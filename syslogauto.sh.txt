@@ -1,0 +1,631 @@
+#!/bin/bash
+
+ 
+
+# Define the directories to search for files
+
+parse_maps_dirs=(/opt/Spectrum/SS/ParseMaps /opt/Spectrum/custom/ParseMaps)
+
+events_format_dirs=(/opt/Spectrum/SG-Support/CsEvFormat /opt/Spectrum/custom/Events/CsEvFormat)
+
+pcause_dirs=(/opt/Spectrum/SG-Support/CsPCause /opt/Spectrum/custom/Events/CsPCause)
+
+event_disp_file_path="/opt/Spectrum/custom/Events"
+
+parse_maps_file_path="/opt/Spectrum/custom/ParseMaps/$pattern"
+
+ev_format_file_path="/opt/Spectrum/custom/Events/CsEvFormat"
+
+pcause_file_path="/opt/Spectrum/custom/Events/CsPCause/Prob"
+
+prod_file_path="/opt/Spectrum/custom/Events/CsProd/Prod"
+
+event_disp_file="/opt/Spectrum/custom/Events/EventDisp"
+
+ 
+
+# Function to check if the hex_number is unique
+
+function is_hex_number_unique {
+
+ local hex_number=$1
+
+ 
+
+               # Check files in the events format directories
+
+               for dir in "${events_format_dirs[@]}"; do
+
+                              for file in "$dir"/*; do
+
+                                             if grep -q "Event\$${hex_number}" "$file"; then
+
+                                                            return 1
+
+                                             fi
+
+                              done
+
+               done
+
+ 
+
+               # Check files in the pcause directories
+
+               for dir in "${pcause_dirs[@]}"; do
+
+                              for file in "$dir"/*; do
+
+                                             if grep -q "Prob\$${hex_number}" "$file"; then
+
+                                                            return 1
+
+                                             fi
+
+                              done
+
+               done
+
+ 
+
+  return 0
+
+}
+
+ 
+
+# Read the file line by line
+
+while read line; do
+
+  # Split the line into its components
+
+  components=($(echo $line | tr ',' ' '))
+
+ 
+
+# Check if there are at least 3 components and the 3rd component does not contain ":"
+
+if [ ${#components[@]} -ge 2 ] && [[ ${components[2]} != *:* ]]; then
+
+               pattern=${components[0]}
+
+    severity=${components[1]}
+
+    logging=${components[2]}
+
+ 
+
+               # is Pattern a Discard
+
+               if [ $logging = "DISCARD" ]; then
+
+              
+
+                              break
+
+                             
+
+               else
+
+                             
+
+                              # Search for Pattern in PareMaps and store event_id if found
+
+                              found=false
+
+                              event_id=""
+
+                              for dir in "${parse_maps_dirs[@]}"; do
+
+                                if [ -f "$dir/$pattern" ]; then
+
+                                             found=true
+
+                                             event_id=$(grep -oP '^Event\K\d+' "$dir/$pattern")
+
+                                fi
+
+                              done
+
+ 
+
+                              # This is section where no ParseMap was found
+
+                              if [ "$found" = false ]; then
+
+                                            
+
+                                             # Generate a unique hex_number
+
+                                             hex_number=$(printf '06e6%04x' $RANDOM)
+
+                                             while ! is_hex_number_unique "$hex_number"; do
+
+                                                            hex_number=$(printf '06e6%04x' $RANDOM)
+
+                                             done
+
+ 
+
+                                             # Create the ParseMaps file
+
+                                             echo "Event$hex_number" > "$parse_maps_file_path"
+
+                                             echo "({ STRING 1 })" >> "$parse_maps_file_path"
+
+                                             echo "" >> "$parse_maps_file_path"
+
+                                             echo "Pattern : ({ STRING 1 })" >> "$parse_maps_file_path"
+
+                                                           
+
+                                             # Create the CsEvFormat file
+
+                                             cp /home/dxadmin/syslog/automation/Template_Event "$ev_format_file_path"
+
+                                             sed -i "s/%$hex_number%/$pattern/g" "$ev_format_file_path"
+
+                               
+
+                                             if [ "$logging" = "LOGONLY" ]; then
+
+                                                           
+
+                                                            #Check if Event exist in EventDisp
+
+                                                            custom_event_disp_line=$(grep -F "$hex_number" "$event_disp_file")
+
+ 
+
+                                                            if [[ -n "$custom_event_disp_line" ]]; then
+
+                                                                                                                       
+
+                                                                           # Append to the line in the log file
+
+                                                                           echo "$line:$custom_event_disp_line" >> /home/dxadmin/syslogautomation/prodsyslogfull
+
+                                                                           break 2
+
+                                                                          
+
+                                                            else
+
+                                                                          
+
+                                                                           # Update the EventDisp file
+
+                                                                           e=$(echo "0x$hex_number E 20" >> "$event_disp_file")
+
+                             
+
+                                                                           # Append to the line in the log file
+
+                                                                           echo "$line:$e" >> /home/dxadmin/syslogautomation/prodsyslogfull
+
+                                                                           break 2
+
+                                                            fi
+
+                                                           
+
+                                             else
+
+                                            
+
+                                                            # Create the Prob file
+
+                                                            if [ ! -f "$pcause_file_path" ]; then
+
+                                                                           echo "Prob${hex_number}_en_US" > "$pcause_file_path"
+
+                                                                           echo "" >> "$pcause_file_path"
+
+                                                                           echo "" >> "$pcause_file_path"
+
+                                                                           echo "" >> "$pcause_file_path"
+
+                                                                           echo "Pattern : ({ STRING 1 })" >> "$pcause_file_path"
+
+                                                            fi
+
+                                            
+
+                                                            #Check if Event exist in EventDisp
+
+                                                            custom_event_disp_line=$(grep -F "$hex_number" "$event_disp_file")
+
+ 
+
+                                                            if [[ -n "$custom_event_disp_line" ]]; then
+
+                                                                                         
+
+                                                                           # Check for independent "A" in EventDisp line    
+
+                                                                           if echo "$custom_event_disp_line" | grep -q '\bA\b'; then
+
+                                                                                         
+
+                                                                                          # Append to the line in the log file
+
+                                                                                          echo "$line:$custom_event_disp_line" >> /home/dxadmin/syslogautomation/prodsyslogfull
+
+                                                                                          break 2
+
+                                                                          
+
+                                                                           else
+
+                                                                          
+
+                                                                                          #replace the existing line in EventDisp with proper values
+
+                                                                                          replace_line="0x$hex_number E 20 A, $severity, 0x$hex_number"
+
+                                                                                          sed -i "s/$custom_event_disp_line/$replace_line/g" "$event_disp_file")
+
+                                                                          
+
+                                                                                          # Append to the line in the log file
+
+                                                                                          echo "$line:$replace_line" >> /home/dxadmin/syslogautomation/prodsyslogfull
+
+                                                                                          break 2
+
+                                                                          
+
+                                                            else
+
+                                                                          
+
+                                                                           # Update the EventDisp file
+
+                                                                           e=$(echo "0x$hex_number E 20 A $severity, 0x$hex_number" >> "$event_disp_file_path")
+
+                             
+
+                                                                           # Append to the line in the log file
+
+                                                                           echo "$line:$e" >> /home/dxadmin/syslogautomation/prodsyslogfull
+
+                                                                           break 2
+
+                                                            fi
+
+                                                           
+
+                                             fi
+
+                                                           
+
+                              fi
+
+                             
+
+                              # This is section where ParseMap was found
+
+                              else
+
+ 
+
+                                             #Event file found
+
+                                             if grep -q "Event\$${event_id}" "$event_disp_file_path"; then
+
+                                                                                                        
+
+                                                            if [ "$logging" = "LOGONLY" ]; then
+
+                                                           
+
+                                                            #Check if Event exist in EventDisp
+
+                                                            custom_event_disp_line=$(grep -F "$hex_number" "$event_disp_file")
+
+ 
+
+                                                            if [[ -n "$custom_event_disp_line" ]]; then
+
+                                                                                                                       
+
+                                                                           # Append to the line in the log file
+
+                                                                           echo "$line:$custom_event_disp_line" >> /home/dxadmin/syslogautomation/prodsyslogfull
+
+                                                                           break 2
+
+                                                                          
+
+                                                            else
+
+                                                                           # Update the EventDisp file
+
+                                                                           e=$(echo "0x$hex_number E 20" >> "$event_disp_file")
+
+                             
+
+                                                                           # Append to the line in the log file
+
+                                                                           echo "$line:$e" >> /home/dxadmin/syslogautomation/prodsyslogfull
+
+                                                                           break 2
+
+                                                            fi
+
+                                            
+
+                                             # Event File Not found
+
+                                             else
+
+                                                           
+
+                                                            # Create the CsEvFormat file
+
+                                                            cp /home/dxadmin/syslog/automation/Template_Event "$ev_format_file_path"
+
+                                                            sed -i "s/%$event_id%/$pattern/g" "$ev_format_file_path"
+
+                                                           
+
+                                                            if [ "$logging" = "LOGONLY" ]; then
+
+                                                           
+
+                                                                           #Check if Event exist in EventDisp
+
+                                                                           custom_event_disp_line=$(grep -F "$event_id" "$event_disp_file")
+
+ 
+
+                                                                           if [[ -n "$custom_event_disp_line" ]]; then
+
+                                                                                                                       
+
+                                                                                          # Append to the line in the log file
+
+                                                                                          echo "$line:$custom_event_disp_line" >> /home/dxadmin/syslogautomation/prodsyslogfull
+
+                                                                                          break 2
+
+                                                                          
+
+                                                                           else
+
+                                                                          
+
+                                                                                          # Update the EventDisp file
+
+                                                                                          e=$(echo "0x$event_id E 20" >> "$event_disp_file")
+
+                             
+
+                                                                                          # Append to the line in the log file
+
+                                                                                          echo "$line:$e" >> /home/dxadmin/syslogautomation/prodsyslogfull
+
+                                                                                          break 2
+
+                                                                           fi
+
+                                                           
+
+                                                            # Not LOGONLY
+
+                                                            else
+
+                                                                                         
+
+                                                                           #Prob file found
+
+                                                                           if grep -q "Prob\$${event_id}" "$pcause_file_path"; then
+
+                                                                          
+
+                                                                                          #Check if Event exist in EventDisp
+
+                                                                                          custom_event_disp_line=$(grep -F "$event_id" "$event_disp_file'")
+
+ 
+
+                                                                                          # Event exists in EventDisp
+
+                                                                                          if [[ -n "$custom_event_disp_line" ]]; then
+
+                                                                                                                       
+
+                                                                                                         # Check for independent "A" in EventDisp line   
+
+                                                                                                         if echo "$custom_event_disp_line" | grep -q '\bA\b'; then
+
+                                                                                                                       
+
+                                                                                                                        # Append to the line in the log file
+
+                                                                                                                        echo "$line:$custom_event_disp_line" >> /home/dxadmin/syslogautomation/prodsyslogfull
+
+                                                                                                                        break 2
+
+                                                                                                        
+
+                                                                                                         else
+
+                                                                                                        
+
+                                                                                                                        #replace the existing line in EventDisp with proper values
+
+                                                                                                                        replace_line="0x$event_id E 20 A, $severity, 0x$event_id"
+
+                                                                                                                        sed -i "s/$custom_event_disp_line/$replace_line/g" "$event_disp_file")
+
+                                                                                                        
+
+                                                                                                                        # Append to the line in the log file
+
+                                                                                                                        echo "$line:$replace_line" >> /home/dxadmin/syslogautomation/prodsyslogfull
+
+                                                                                                                        break 2
+
+                                                                                                        
+
+                                                                                          # Event does not exist in EventDisp          
+
+                                                                                          else
+
+                                                                                                        
+
+                                                                                                         # Update the EventDisp file
+
+                                                                                                         e=$(echo "0x$event_id E 20 A $severity, 0x$event_id" >> "$event_disp_file")
+
+                                                           
+
+                                                                                                         # Append to the line in the log file
+
+                                                                                                         echo "$line:$e" >> /home/dxadmin/syslogautomation/prodsyslogfull
+
+                                                                                                         break 2
+
+                                                                                          fi
+
+                                                                                                        
+
+                                                                          
+
+                                                                           # No Prob File found      
+
+                                                                           else
+
+                                                                          
+
+                                                                                          # Create the Prob file
+
+                                                                                          if [ ! -f "$pcause_file_path" ]; then
+
+                                                                                                         echo "Prob${event_id}_en_US" > "$pcause_file_path"
+
+                                                                                                         echo "" >> "$pcause_file_path"
+
+                                                                                                         echo "" >> "$pcause_file_path"
+
+                                                                                                         echo "" >> "$pcause_file_path"
+
+                                                                                                         echo "Pattern : ({ STRING 1 })" >> "$pcause_file_path"
+
+                                                                                          fi
+
+                                                                          
+
+                                                                                          #Check if Event exist in EventDisp
+
+                                                                                          custom_event_disp_line=$(grep -F "$event_id" "$event_disp_file")
+
+ 
+
+                                                                                          if [[ -n "$custom_event_disp_line" ]]; then
+
+                                                                                                                       
+
+                                                                                                         # Check for independent "A" in EventDisp line   
+
+                                                                                                         if echo "$custom_event_disp_line" | grep -q '\bA\b'; then
+
+                                                                                                                       
+
+                                                                                                                        # Append to the line in the log file
+
+                                                                                                                        echo "$line:$custom_event_disp_line" >> /home/dxadmin/syslogautomation/prodsyslogfull
+
+                                                                                                                        break 2
+
+                                                                                                        
+
+                                                                                                         else
+
+                                                                                                        
+
+                                                                                                                        #replace the existing line in EventDisp with proper values
+
+                                                                                                                        replace_line="0x$event_id E 20 A, $severity, 0x$event_id"
+
+                                                                                                                        sed -i "s/$custom_event_disp_line/$replace_line/g" "$event_disp_file")
+
+                                                                                                        
+
+                                                                                                                        # Append to the line in the log file
+
+                                                                                                                        echo "$line:$replace_line" >> /home/dxadmin/syslogautomation/prodsyslogfull
+
+                                                                                                                        break 2
+
+                                                                                                        
+
+                                                                                          else
+
+                                                                                                        
+
+                                                                                                         # Update the EventDisp file
+
+                                                                                                         e=$(echo "0x$event_id E 20 A $severity, 0x$event_id" >> "$event_disp_file_path")
+
+                                                           
+
+                                                                                                         # Append to the line in the log file
+
+                                                                                                         echo "$line:$e" >> /home/dxadmin/syslogautomation/prodsyslogfull
+
+                                                                                                         break 2
+
+                                                                                                        
+
+                                                                                          #Close (Check if Event exist in EventDisp)
+
+                                                                                          fi
+
+                                                                                         
+
+                                                                           #Close (#Prob file found)             
+
+                                                                           fi
+
+                                                                          
+
+                                                            #Close (is LOGONLY        )
+
+                                                            fi
+
+                                                           
+
+                                             #Close (#Event file found)
+
+                                             fi
+
+                                                           
+
+                              #Close (This is section where no ParseMap was found)
+
+                              fi                           
+
+              
+
+               #Close (# is Pattern a Discard)
+
+               fi
+
+                                                           
+
+#Close ( Check if there are at least 3 components and the 3rd component does not contain ":")                                                     
+
+fi                                                         
+
+ 
+
+done < /home/dxadmin/syslogautomation/prodsyslogfull.log
+
+ 
+
+...
+
+[Message clipped]  View entire message
